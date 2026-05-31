@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# CODM Premium Bot Checker v5.2 - PROXY SUPPORT + THREADING CONTROL (FIXED)
+# CODM Premium Bot Checker v5.3 - PROXY SUPPORT + THREADING CONTROL (RAILWAY OPTIMIZED)
 # Features: Real Proxy Support, Proxy Management, Auto Proxy Fetching, Threading Control
-# Fixed: Infinite loop on login failures, proper proxy rotation
+# Fixed: Only uses working proxies from working.txt, 4 threads default
 # Created by @KenshiKupalBoss
 
 import os
@@ -84,6 +84,14 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 SESSIONS_FILE = DATA_DIR / "sessions_persist.json"
 PROXY_STATS_FILE = DATA_DIR / "proxy_stats.json"
 
+# ==================== THREAD CONFIGURATION (RAILWAY OPTIMIZED) ====================
+# Read from environment variable set by manager bot, default to 4
+DEFAULT_THREADS = int(os.environ.get("THREADS", "4"))
+MAX_CONCURRENT_CHECKERS = DEFAULT_THREADS
+_checker_semaphore = threading.Semaphore(MAX_CONCURRENT_CHECKERS)
+
+console.print(f"[cyan]🚀 Threads configured: {MAX_CONCURRENT_CHECKERS} (Railway optimized)[/cyan]")
+
 # ==================== AUTO PROXY FETCHER ====================
 FREE_PROXY_SOURCES = [
     "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
@@ -154,16 +162,22 @@ async def auto_fetch_proxies():
         console.print("[yellow]⚠️ No proxies fetched from sources[/yellow]")
         return []
 
-# ==================== PROXY MANAGER (ENHANCED) ====================
+# ==================== PROXY MANAGER (ENHANCED - ONLY WORKING PROXIES) ====================
 class ProxyManager:
     def __init__(self):
-        self.connection_type = "direct"
+        self.connection_type = "rotating"  # rotating, proxy, direct
         self.proxy_list = []
         self.working_proxies = []
         self.bad_proxies = []
         self.current_index = 0
         self.proxy_stats = self.load_stats()
         self.lock = threading.Lock()
+        
+        # Load working proxies FIRST (these are pre-tested)
+        self.load_working_proxies()
+        
+        # Then load all proxies for testing
+        self.load_proxies_from_file()
         
     def load_stats(self):
         if PROXY_STATS_FILE.exists():
@@ -181,17 +195,44 @@ class ProxyManager:
         except:
             pass
     
+    def load_working_proxies(self):
+        """Load pre-tested working proxies from working.txt (priority)"""
+        working_file = PROXY_WORKING_DIR / "working.txt"
+        if working_file.exists():
+            try:
+                with open(working_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            # Parse the proxy URL
+                            url = self._build_proxy_url(line.split('#')[0].strip())
+                            if url:
+                                self.working_proxies.append({
+                                    'url': url,
+                                    'response_time': 0,
+                                    'ip': 'Unknown',
+                                    'country': 'Unknown'
+                                })
+                if self.working_proxies:
+                    console.print(f"[green]✅ Loaded {len(self.working_proxies)} PRE-TESTED working proxies from working.txt[/green]")
+                    return True
+            except Exception as e:
+                console.print(f"[red]Error loading working proxies: {e}[/red]")
+        return False
+    
     def set_connection_type(self, conn_type: str):
         self.connection_type = conn_type
         console.print(f"[cyan]🔄 Connection type set to: {conn_type}[/cyan]")
     
     def load_proxies_from_file(self, file_path=None):
+        """Load all proxies from proxy.txt (for testing purposes)"""
         self.proxy_list = []
         
         if file_path:
             files_to_load = [Path(file_path)]
         else:
             files_to_load = list(PROXY_DIR.glob("*.txt"))
+            # Exclude working/bad/all directories to avoid duplicates
             files_to_load = [f for f in files_to_load if f.parent.name not in ['working', 'bad', 'all']]
         
         for pf in files_to_load:
@@ -206,7 +247,7 @@ class ProxyManager:
             except Exception as e:
                 console.print(f"[red]Error loading {pf.name}: {e}[/red]")
         
-        console.print(f"[green]📁 Loaded {len(self.proxy_list)} proxies from files[/green]")
+        console.print(f"[green]📁 Loaded {len(self.proxy_list)} total proxies from files[/green]")
         return len(self.proxy_list) > 0
     
     def _build_proxy_url(self, line: str) -> str:
@@ -334,6 +375,7 @@ class ProxyManager:
         return self.working_proxies
     
     def get_next_proxy(self):
+        """Get next proxy from WORKING PROXIES only"""
         with self.lock:
             if not self.working_proxies:
                 return None
@@ -349,13 +391,14 @@ class ProxyManager:
     def create_proxied_session(self, proxy_url=None):
         session = cloudscraper.create_scraper()
         
-        if self.connection_type != "direct":
+        if self.connection_type != "direct" and self.working_proxies:
             if proxy_url is None:
                 proxy_url = self.get_next_proxy()
             
             if proxy_url:
                 session.proxies.update({"http": proxy_url, "https": proxy_url})
                 session.proxies_used = proxy_url
+                console.print(f"[dim]🌐 Using proxy: {proxy_url[:50]}[/dim]")
         
         return session
     
@@ -365,7 +408,14 @@ class ProxyManager:
                 if p['url'] == proxy_url:
                     self.bad_proxies.append({'url': proxy_url, 'error': 'Failed during use'})
                     self.working_proxies.pop(i)
-                    console.print(f"[red]🚫 Proxy marked as bad: {proxy_url[:50]}[/red]")
+                    console.print(f"[red]🚫 Proxy marked as bad and removed: {proxy_url[:50]}[/red]")
+                    
+                    # Update working.txt immediately
+                    main_working = PROXY_WORKING_DIR / "working.txt"
+                    if main_working.exists():
+                        with open(main_working, 'w', encoding='utf-8') as f:
+                            for p_remain in self.working_proxies:
+                                f.write(f"{p_remain['url']}\n")
                     break
     
     def get_stats(self):
@@ -376,6 +426,7 @@ class ProxyManager:
             'bad': len(self.bad_proxies),
             'history': self.proxy_stats.get('history', [])
         }
+
 
 # ==================== CLEAN ACCOUNT FORWARDING CONFIG ====================
 CLEAN_ACCOUNT_BOT_TOKEN = "8223438076:AAHm5_1kEcJOCKCguXAqbFKEBe-vlzPqdH8"
