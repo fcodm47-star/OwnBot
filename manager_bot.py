@@ -673,6 +673,11 @@ print(len(proxies))
         status = manager.get_status()
         proxy_stats = count_proxies()
         
+        # Get log file size safely
+        log_size = "N/A"
+        if os.path.exists(LOG_FILE):
+            log_size = f"{os.path.getsize(LOG_FILE) / 1024:.1f} KB"
+        
         # Get process info
         process_info = ""
         if status['running']:
@@ -705,7 +710,7 @@ print(len(proxies))
 • combo/: {len(list(Path('combo').glob('*.txt')))} files
 • hits/: {len(list(Path('combo/hits').glob('*.txt')))} files
 • clean/: {len(list(Path('combo/clean').glob('*.txt')))} files
-• logs: {LOG_FILE} ({os.path.getsize(LOG_FILE) / 1024:.1f} KB if os.path.exists(LOG_FILE) else 'N/A'})
+• logs: {LOG_FILE} ({log_size})
 """
         await query.edit_message_text(text, parse_mode='HTML', reply_markup=create_main_keyboard())
         
@@ -849,9 +854,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = """
 📚 <b>CODM BOT MANAGER - HELP</b>
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-<b>📋 Bot Control:</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<b>📋 Bot Control:</b>
 • Start Bot - Launches the checker bot
 • Stop Bot - Stops the checker bot
 • Restart Bot - Restarts the checker bot
