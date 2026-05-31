@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Environment
+.env
+.venv
+env/
+
+# Bot files
+*.pid
+*.log
+checker_bot.pid
+checker_bot.log
+
+# Data directories
+combo/hits/
+combo/clean/
+combo/processed/
+proxy/working/
+proxy/bad/
+data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Railway
+.railway/
